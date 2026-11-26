@@ -21,6 +21,7 @@ import android.net.wifi.WifiManager
 import android.telephony.SubscriptionManager
 import com.android.settingslib.net.DataUsageController
 import com.android.systemui.dagger.SysUISingleton
+import com.android.systemui.dagger.qualifiers.Background
 import com.android.systemui.plugins.ActivityStarter
 import com.android.systemui.qs.footer.data.repository.ForegroundServicesRepository
 import com.android.systemui.qs.footer.data.repository.ForegroundServicesRepositoryImpl
@@ -35,6 +36,7 @@ import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
 
 /** Dagger module to provide/bind footer actions singletons. */
 @Module
@@ -65,7 +67,8 @@ interface FooterActionsModule {
             tunerService: TunerService,
             globalSettings: GlobalSettings,
             activityStarter: ActivityStarter,
-            userTracker: UserTracker
+            userTracker: UserTracker,
+            @Background backgroundDispatcher: CoroutineDispatcher,
         ): FooterActionsDataUsageViewModel {
             return FooterActionsDataUsageViewModel(
                 context,
@@ -76,7 +79,8 @@ interface FooterActionsModule {
                 tunerService,
                 globalSettings,
                 activityStarter,
-                userTracker
+                userTracker,
+                backgroundDispatcher,
             )
         }
     }

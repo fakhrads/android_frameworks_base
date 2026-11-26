@@ -14,6 +14,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.settingslib.net.DataUsageController
 import com.android.systemui.animation.Expandable
+import com.android.systemui.dagger.qualifiers.Background
 import com.android.systemui.plugins.ActivityStarter
 import com.android.systemui.res.R
 import com.android.systemui.settings.UserTracker
@@ -23,10 +24,14 @@ import com.android.systemui.statusbar.connectivity.WifiIndicators
 import com.android.systemui.tuner.TunerService
 import com.android.systemui.util.settings.GlobalSettings
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 
@@ -42,8 +47,13 @@ class FooterActionsDataUsageViewModel @Inject constructor(
     private val tunerService: TunerService,
     private val globalSettings: GlobalSettings,
     private val activityStarter: ActivityStarter,
-    private val userTracker: UserTracker
+    private val userTracker: UserTracker,
+    @Background backgroundDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
+
+    // DataUsageController keeps the subscription between calls, so queries run one at a time.
+    private val queryDispatcher = backgroundDispatcher.limitedParallelism(1)
+    private var updateJob: Job? = null
     
     private val _dataUsageText = MutableStateFlow<String?>(null)
     val dataUsageText: StateFlow<String?> = _dataUsageText.asStateFlow()
@@ -116,13 +126,6 @@ class FooterActionsDataUsageViewModel @Inject constructor(
         // Set initial values
         onDefaultDataSimChanged()
         
-        // Initialize WiFi status
-        val wifiInfo = wifiManager?.connectionInfo
-        if (wifiInfo != null && wifiInfo.networkId != -1) {
-            isWifiConnected = true
-            wifiSsid = wifiInfo.ssid
-        }
-        
         // Initialize settings from tuner
         hideDataUsage = !TunerService.parseIntegerSwitch(tunerService.getValue("qs_show_data_usage"), true)
         cycleType = TunerService.parseInteger(tunerService.getValue("qs_data_usage_cycle_type"), 0)
@@ -139,11 +142,7 @@ class FooterActionsDataUsageViewModel @Inject constructor(
     }
 
     private fun onWifiStatusUpdated() {
-        // Update WiFi SSID when WiFi is connected
-        if (isWifiConnected) {
-            val wifiInfo = wifiManager?.connectionInfo
-            wifiSsid = wifiInfo?.ssid
-        }
+        // The SSID is read with the usage, off the main thread.
         updateDataUsage()
     }
 
@@ -155,78 +154,102 @@ class FooterActionsDataUsageViewModel @Inject constructor(
         updateDataUsage()
     }
 
+    /**
+     * Queries the usage in the background and publishes it. The query reads network stats and can
+     * take tens of milliseconds, and signal callbacks ask for it in bursts (several per shade
+     * opening, and on every Wi-Fi level change), so a request replaces one that has not started yet.
+     */
     private fun updateDataUsage() {
+        updateJob?.cancel()
         if (hideDataUsage) {
             _isVisible.value = false
             return
         }
-
-        val info = when {
-            isWifiConnected -> {
-                if (cycleType == 1) {
-                    // Weekly WiFi data usage
-                    var wifiInfo = dataController.getWifiDataUsageInfo(true)
-                    if (wifiInfo == null) {
-                        wifiInfo = dataController.getWifiDataUsageInfo(false)
+        val wifiConnected = isWifiConnected
+        val noSims = hasNoSims
+        val sub = subId
+        val weekly = cycleType == 1
+        val showSuffix = _showSuffix.value
+        updateJob =
+            viewModelScope.launch {
+                delay(UPDATE_DEBOUNCE_MS)
+                val usageText =
+                    withContext(queryDispatcher) {
+                        queryUsageText(wifiConnected, noSims, sub, weekly, showSuffix)
                     }
-                    wifiInfo
+                if (usageText == null) {
+                    _isVisible.value = false
                 } else {
-                    // Daily WiFi data usage
-                    var wifiInfo = dataController.getWifiDailyDataUsageInfo(true)
-                    if (wifiInfo == null) {
-                        wifiInfo = dataController.getWifiDailyDataUsageInfo(false)
-                    }
-                    wifiInfo
+                    _dataUsageText.value = usageText
+                    _isVisible.value = true
                 }
             }
-            !hasNoSims && subId != SubscriptionManager.INVALID_SUBSCRIPTION_ID -> {
-                dataController.setSubscriptionId(subId)
-                if (cycleType == 1) {
-                    // Weekly mobile data usage
-                    dataController.getDataUsageInfo()
-                } else {
-                    // Daily mobile data usage
-                    dataController.getDailyDataUsageInfo()
-                }
-            }
-            else -> null
-        }
-
-        if (info == null) {
-            _isVisible.value = false
-            return
-        }
-
-        val suffix = when {
-            isWifiConnected -> {
-                if (wifiSsid != null) {
-                    wifiSsid!!.replace("\"", "")
-                } else {
-                    context.getString(R.string.usage_wifi_default_suffix)
-                }
-            }
-            !hasNoSims -> {
-                val subInfo = subManager.getActiveSubscriptionInfo(subId)
-                subInfo?.displayName?.toString() ?: context.getString(R.string.usage_data_default_suffix)
-            }
-            else -> context.getString(R.string.usage_data_default_suffix)
-        }
-
-        val usageText = formatDataUsage(info.usageLevel, suffix)
-        _dataUsageText.value = usageText
-        _isVisible.value = true
     }
 
-    private fun formatDataUsage(byteValue: Long, suffix: String): String {
+    /** Runs on [queryDispatcher]. */
+    private fun queryUsageText(
+        wifiConnected: Boolean,
+        noSims: Boolean,
+        sub: Int,
+        weekly: Boolean,
+        showSuffix: Boolean,
+    ): String? {
+        val info =
+            when {
+                wifiConnected -> {
+                    if (weekly) {
+                        dataController.getWifiDataUsageInfo(true)
+                            ?: dataController.getWifiDataUsageInfo(false)
+                    } else {
+                        dataController.getWifiDailyDataUsageInfo(true)
+                            ?: dataController.getWifiDailyDataUsageInfo(false)
+                    }
+                }
+                !noSims && sub != SubscriptionManager.INVALID_SUBSCRIPTION_ID -> {
+                    dataController.setSubscriptionId(sub)
+                    if (weekly) {
+                        dataController.getDataUsageInfo()
+                    } else {
+                        dataController.getDailyDataUsageInfo()
+                    }
+                }
+                else -> null
+            } ?: return null
+
+        if (wifiConnected) {
+            wifiSsid = wifiManager?.connectionInfo?.takeIf { it.networkId != -1 }?.ssid
+        }
+        val suffix =
+            if (!showSuffix) {
+                ""
+            } else
+                when {
+                    wifiConnected ->
+                        wifiSsid?.replace("\"", "")
+                            ?: context.getString(R.string.usage_wifi_default_suffix)
+                    !noSims ->
+                        subManager.getActiveSubscriptionInfo(sub)?.displayName?.toString()
+                            ?: context.getString(R.string.usage_data_default_suffix)
+                    else -> context.getString(R.string.usage_data_default_suffix)
+                }
+        return formatDataUsage(info.usageLevel, suffix, weekly, showSuffix)
+    }
+
+    private fun formatDataUsage(
+        byteValue: Long,
+        suffix: String,
+        weekly: Boolean,
+        showSuffix: Boolean,
+    ): String {
         val usage = StringBuilder(Formatter.formatFileSize(context, byteValue, Formatter.FLAG_IEC_UNITS))
             .append(" ")
-            .append(if (cycleType == 1) {
+            .append(if (weekly) {
                 context.getString(R.string.usage_data_weekly)
             } else {
                 context.getString(R.string.usage_data)
             })
         
-        if (_showSuffix.value == true) {
+        if (showSuffix) {
             usage.append(" (")
                 .append(suffix)
                 .append(")")
@@ -262,8 +285,13 @@ class FooterActionsDataUsageViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        updateJob?.cancel()
         networkController.removeCallback(signalCallback)
         tunerService.removeTunable(tunerCallback)
         globalSettings.unregisterContentObserverSync(dataSwitchObserver)
+    }
+
+    private companion object {
+        const val UPDATE_DEBOUNCE_MS = 200L
     }
 }
