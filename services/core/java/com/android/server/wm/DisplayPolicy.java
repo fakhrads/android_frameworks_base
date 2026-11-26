@@ -238,6 +238,9 @@ public class DisplayPolicy {
     BoostFramework mPerfBoostDrag = null;
     BoostFramework mPerfBoostFling = null;
     BoostFramework mPerfBoostPrefling = null;
+    /** Drag boost type, in the vendor perf config, for the moments after a drag ends. */
+    private static final int DRAG_END_BOOST_TYPE = 8;
+    BoostFramework mPerfBoostDragEnd = null;
     BoostFramework mPerf = new BoostFramework();
     private boolean mIsPerfBoostFlingAcquired;
 
@@ -790,6 +793,16 @@ public class DisplayPolicy {
                                             currentActivity, -1, 1);
                             }
                         } else {
+                            if (!started && !isGame) {
+                                // The drag boost ends as the finger lifts, but what follows still
+                                // animates (the shade settling, a list snapping back): keep the GPU
+                                // floor for that with a short boost perfd times out by itself.
+                                if (mPerfBoostDragEnd == null) {
+                                    mPerfBoostDragEnd = new BoostFramework();
+                                }
+                                mPerfBoostDragEnd.perfHint(BoostFramework.VENDOR_HINT_DRAG_BOOST,
+                                        currentPackage, -1, DRAG_END_BOOST_TYPE);
+                            }
                             if (SILKY_SCROLLS_ENABLE || SILKY_SCROLLS_LITE_ENABLE){
                             if(mPerfBoostDrag.board_first_api_lvl <= BoostFramework.VENDOR_V_API_LEVEL &&
                                mPerfBoostDrag.board_api_lvl <= BoostFramework.VENDOR_V_API_LEVEL) {
