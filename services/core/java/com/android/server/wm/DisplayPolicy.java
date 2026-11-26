@@ -64,6 +64,7 @@ import static android.view.WindowManager.LayoutParams.INVALID_WINDOW_TYPE;
 import static android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
 import static android.view.WindowManager.LayoutParams.PRIVATE_FLAG_CONSUME_IME_INSETS;
 import static android.view.WindowManager.LayoutParams.PRIVATE_FLAG_IMMERSIVE_CONFIRMATION_WINDOW;
+import static android.view.Display.DEFAULT_DISPLAY;
 import static android.view.Display.INVALID_DISPLAY;
 import static android.view.WindowManager.LayoutParams.PRIVATE_FLAG_INTERCEPT_GLOBAL_DRAG_AND_DROP;
 import static android.view.WindowManager.LayoutParams.PRIVATE_FLAG_LAYOUT_SIZE_EXTENDED_BY_CUTOUT;
@@ -119,6 +120,7 @@ import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.Region;
 import android.gui.DropInputMode;
+import android.hardware.display.DisplayManager;
 import android.hardware.power.Boost;
 import android.os.Handler;
 import android.os.IBinder;
@@ -135,6 +137,7 @@ import android.util.ArraySet;
 import android.util.Slog;
 import android.util.SparseArray;
 import android.util.proto.ProtoOutputStream;
+import android.view.Display;
 import android.view.DisplayInfo;
 import android.view.InsetsFlags;
 import android.view.InsetsFrameProvider;
@@ -243,6 +246,30 @@ public class DisplayPolicy {
     BoostFramework mPerfBoostDragEnd = null;
     BoostFramework mPerf = new BoostFramework();
     private boolean mIsPerfBoostFlingAcquired;
+
+    /**
+     * Refresh rate update for the vendor perf HAL (the hint type carries the fps). perfd picks
+     * the fps specific variants of its boosts by this rate; without an update it keeps the rate
+     * it read from the panel when it started early in boot, before the display mode was set.
+     */
+    private static final int VENDOR_HINT_FPS_UPDATE = 0x00001094;
+    private BoostFramework mPerfFps;
+    private int mPerfFpsSent;
+    private final DisplayManager.DisplayListener mPerfFpsListener =
+            new DisplayManager.DisplayListener() {
+                @Override
+                public void onDisplayAdded(int displayId) {}
+
+                @Override
+                public void onDisplayRemoved(int displayId) {}
+
+                @Override
+                public void onDisplayChanged(int displayId) {
+                    if (displayId == DEFAULT_DISPLAY) {
+                        notifyPerfFps();
+                    }
+                }
+            };
 
     private final Object mServiceAcquireLock = new Object();
     private long mPanicTime;
@@ -984,6 +1011,31 @@ public class DisplayPolicy {
         if (mService.mPointerLocationEnabled) {
             setPointerLocationEnabled(true);
         }
+        if (mDisplayContent.isDefaultDisplay && mPerfFps == null) {
+            mPerfFps = new BoostFramework();
+            final DisplayManager dm = mContext.getSystemService(DisplayManager.class);
+            if (dm != null) {
+                // Mode changes come as display changes; the hint is a binder call to the perf
+                // HAL, so keep it off the window manager and UI threads.
+                dm.registerDisplayListener(mPerfFpsListener, BackgroundThread.getHandler());
+            }
+            BackgroundThread.getHandler().post(this::notifyPerfFps);
+        }
+    }
+
+    /** Runs on the background thread: sends the default display's mode refresh rate. */
+    private void notifyPerfFps() {
+        final DisplayManager dm = mContext.getSystemService(DisplayManager.class);
+        final Display display = dm != null ? dm.getDisplay(DEFAULT_DISPLAY) : null;
+        if (display == null || display.getMode() == null) {
+            return;
+        }
+        final int fps = Math.round(display.getMode().getRefreshRate());
+        if (fps <= 0 || fps == mPerfFpsSent) {
+            return;
+        }
+        mPerfFpsSent = fps;
+        mPerfFps.perfHint(VENDOR_HINT_FPS_UPDATE, "android", Integer.MAX_VALUE, fps);
     }
 
     private int getDisplayId() {
