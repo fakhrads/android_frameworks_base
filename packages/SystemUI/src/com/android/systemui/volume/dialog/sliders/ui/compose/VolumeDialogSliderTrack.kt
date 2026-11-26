@@ -16,10 +16,6 @@
 
 package com.android.systemui.volume.dialog.sliders.ui.compose
 
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.os.UserHandle
 import android.provider.Settings
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -34,12 +30,9 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SliderState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
@@ -60,6 +53,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastFirst
+import com.android.compose.settings.rememberSystemIntSetting
 import com.android.systemui.qs.ui.compose.qsGradientBrush
 import com.android.systemui.qs.ui.compose.qsGradientMidColor
 import com.android.systemui.qs.ui.compose.rememberQsGradientColors
@@ -576,41 +570,5 @@ data class VolumeSliderGradient(
 
 @Composable
 private fun rememberQsVolumeGradientEnabled(): Boolean {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readGradientEnabled(): Boolean {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver, Settings.System.QS_VOLUME_GRADIENT_ENABLED, 1,
-                UserHandle.USER_CURRENT
-            ) == 1
-        } catch (_: Throwable) {
-            true
-        }
-    }
-
-    var gradientEnabled by remember(contentResolver) { mutableStateOf(readGradientEnabled()) }
-
-    DisposableEffect(contentResolver) {
-        gradientEnabled = readGradientEnabled()
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                context.mainExecutor.execute {
-                    gradientEnabled = readGradientEnabled()
-                }
-            }
-        }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_VOLUME_GRADIENT_ENABLED),
-            false, observer, UserHandle.USER_ALL
-        )
-
-        onDispose {
-            contentResolver.unregisterContentObserver(observer)
-        }
-    }
-
-    return gradientEnabled
+    return rememberSystemIntSetting(Settings.System.QS_VOLUME_GRADIENT_ENABLED, 1) == 1
 }

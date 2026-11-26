@@ -18,7 +18,6 @@ package com.android.systemui.brightness.ui.compose
 
 import android.content.ContentResolver
 import android.content.Context
-import android.database.ContentObserver
 import android.os.UserHandle
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
@@ -54,7 +53,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.derivedStateOf
@@ -104,6 +102,8 @@ import com.android.compose.lifecycle.DisposableEffectWithLifecycle
 import com.android.compose.modifiers.padding
 import com.android.compose.modifiers.sliderPercentage
 import com.android.compose.modifiers.thenIf
+import com.android.compose.settings.SharedSettings
+import com.android.compose.settings.rememberSystemIntSetting
 import com.android.compose.ui.graphics.drawInOverlay
 import com.android.systemui.biometrics.Utils.toBitmap
 import com.android.systemui.brightness.domain.model.GammaBrightness
@@ -157,7 +157,8 @@ fun BrightnessSlider(
     val context = LocalContext.current
     val cr = context.contentResolver
 
-    var hapticsEnabled by remember { mutableStateOf(readEnableHaptics(cr)) }
+    val hapticsEnabled =
+        rememberSystemIntSetting(Settings.System.QS_BRIGHTNESS_SLIDER_HAPTIC, 1) != 0
 
     val shapeMode = rememberSliderShapeMode()
     val trackCornerDp: Dp = qsSliderTrackCornerSize(shapeMode)
@@ -251,35 +252,23 @@ fun BrightnessSlider(
     val hasAutoBrightness = context.resources.getBoolean(
         com.android.internal.R.bool.config_automatic_brightness_available
     )
-    var showAutoBrightness by remember { mutableStateOf(readShowAutoBrightness(cr)) }
+    val showAutoBrightness =
+        remember {
+                SharedSettings.state(
+                    context,
+                    "lineage/secure/int/${LineageSettings.Secure.QS_SHOW_AUTO_BRIGHTNESS}/1",
+                    LineageSettings.Secure.getUriFor(
+                        LineageSettings.Secure.QS_SHOW_AUTO_BRIGHTNESS
+                    ),
+                    default = true,
+                    read = ::readShowAutoBrightness,
+                )
+            }
+            .value
     var gestureSamples by remember { mutableIntStateOf(0) }
     var playTravelHaptics by remember { mutableStateOf(false) }
     val travelTarget by rememberUpdatedState(value)
 
-    DisposableEffect(Unit) {
-        val observer = object : ContentObserver(null) {
-            override fun onChange(selfChange: Boolean) {
-                context.mainExecutor.execute {
-                    showAutoBrightness = readShowAutoBrightness(cr)
-                    hapticsEnabled = readEnableHaptics(cr)
-                }
-            }
-        }
-
-        cr.registerContentObserver(
-            LineageSettings.Secure.getUriFor(LineageSettings.Secure.QS_SHOW_AUTO_BRIGHTNESS),
-            false, observer, UserHandle.USER_ALL
-        )
-
-        cr.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_BRIGHTNESS_SLIDER_HAPTIC),
-            false, observer, UserHandle.USER_ALL
-        )
-
-        onDispose {
-            cr.unregisterContentObserver(observer)
-        }
-    }
 
     // A tap sets the target once. The thumb then animates there, and those samples are what
     // play the tick. A drag already reports its own samples, and an external brightness
@@ -522,43 +511,7 @@ private fun Modifier.sliderBackground(
  */
 @Composable
 fun rememberSliderShapeMode(): Int {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readShapeMode(): Int {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver,
-                Settings.System.QS_BRIGHTNESS_SLIDER_SHAPE,
-                0,
-                UserHandle.USER_CURRENT,
-            )
-        } catch (_: Throwable) {
-            0
-        }
-    }
-
-    var shapeMode by remember { mutableIntStateOf(readShapeMode()) }
-
-    DisposableEffect(contentResolver) {
-        val observer =
-            object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    context.mainExecutor.execute { shapeMode = readShapeMode() }
-                }
-            }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_BRIGHTNESS_SLIDER_SHAPE),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-
-        onDispose { contentResolver.unregisterContentObserver(observer) }
-    }
-
-    return shapeMode
+    return rememberSystemIntSetting(Settings.System.QS_BRIGHTNESS_SLIDER_SHAPE, 0)
 }
 
 /** Track corner radius for the current QS slider shape mode. */
@@ -583,16 +536,6 @@ private fun readShowAutoBrightness(cr: ContentResolver): Boolean =
     try {
         LineageSettings.Secure.getIntForUser(
             cr, LineageSettings.Secure.QS_SHOW_AUTO_BRIGHTNESS,
-            1, UserHandle.USER_CURRENT
-        ) != 0
-    } catch (_: Throwable) {
-        false
-    }
-
-private fun readEnableHaptics(cr: ContentResolver): Boolean =
-    try {
-        Settings.System.getIntForUser(
-            cr, Settings.System.QS_BRIGHTNESS_SLIDER_HAPTIC,
             1, UserHandle.USER_CURRENT
         ) != 0
     } catch (_: Throwable) {
@@ -835,44 +778,7 @@ object BrightnessSliderMotionTestKeys {
 
 @Composable
 private fun rememberQsBrightnessGradientEnabled(): Boolean {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readGradientEnabled(): Boolean {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver,
-                Settings.System.QS_BRIGHTNESS_GRADIENT_ENABLED,
-                1,
-                UserHandle.USER_CURRENT,
-            ) == 1
-        } catch (_: Throwable) {
-            true
-        }
-    }
-
-    var gradientEnabled by remember(contentResolver) { mutableStateOf(readGradientEnabled()) }
-
-    DisposableEffect(contentResolver) {
-        gradientEnabled = readGradientEnabled()
-        val observer =
-            object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    context.mainExecutor.execute { gradientEnabled = readGradientEnabled() }
-                }
-            }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_BRIGHTNESS_GRADIENT_ENABLED),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-
-        onDispose { contentResolver.unregisterContentObserver(observer) }
-    }
-
-    return gradientEnabled
+    return rememberSystemIntSetting(Settings.System.QS_BRIGHTNESS_GRADIENT_ENABLED, 1) == 1
 }
 
 @Composable

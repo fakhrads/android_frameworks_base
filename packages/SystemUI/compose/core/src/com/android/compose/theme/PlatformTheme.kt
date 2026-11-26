@@ -19,10 +19,6 @@
 package com.android.compose.theme
 
 import android.content.Context
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.os.UserHandle
 import android.provider.Settings
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
@@ -33,15 +29,12 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import com.android.app.tracing.TraceUtils
+import com.android.compose.settings.rememberSystemIntSetting
 import com.android.compose.theme.AndroidColorScheme.Companion.color
 import com.android.compose.theme.typography.TypeScaleTokens
 import com.android.compose.theme.typography.TypefaceNames
@@ -108,51 +101,7 @@ val ExpressiveMotionScheme = MotionScheme.expressive()
 
 @Composable
 private fun rememberBouncyMotionMechanicsEnabled(context: Context): Boolean {
-    val contentResolver = context.contentResolver
-
-    fun readSetting(): Boolean {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver,
-                Settings.System.QS_BOUNCY_MOTION_MECHANICS,
-                1,
-                UserHandle.USER_CURRENT,
-            ) == 1
-        } catch (_: Throwable) {
-            true
-        }
-    }
-
-    var enabled by remember(contentResolver) { mutableStateOf(readSetting()) }
-
-    DisposableEffect(contentResolver) {
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                context.mainExecutor.execute {
-                    enabled = readSetting()
-                }
-            }
-        }
-
-        try {
-            contentResolver.registerContentObserver(
-                Settings.System.getUriFor(Settings.System.QS_BOUNCY_MOTION_MECHANICS),
-                false,
-                observer,
-                UserHandle.USER_ALL,
-            )
-        } catch (_: Throwable) {
-        }
-
-        onDispose {
-            try {
-                contentResolver.unregisterContentObserver(observer)
-            } catch (_: Throwable) {
-            }
-        }
-    }
-
-    return enabled
+    return rememberSystemIntSetting(Settings.System.QS_BOUNCY_MOTION_MECHANICS, 1) == 1
 }
 
 private fun platformColorScheme(isDarkTheme: Boolean, context: Context): ColorScheme {

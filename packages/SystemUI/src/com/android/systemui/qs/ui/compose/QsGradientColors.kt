@@ -7,16 +7,11 @@ package com.android.systemui.qs.ui.compose
 
 import android.content.Context
 import android.content.res.Configuration
-import android.database.ContentObserver
 import android.os.UserHandle
 import android.provider.Settings
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -24,6 +19,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.core.graphics.ColorUtils
+import com.android.compose.settings.rememberSystemIntSetting
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.pipeline.battery.shared.ui.BatteryColors
 
@@ -115,65 +111,8 @@ fun rememberQsGradientColors(): QsGradientColors {
 /** User-chosen gradient start/end. Null means fall back to the theme default. */
 @Composable
 fun rememberQsGradientCustomColors(): Pair<Color?, Color?> {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readStart(): Int {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver,
-                Settings.System.GRADIENT_START_COLOR,
-                0,
-                UserHandle.USER_CURRENT,
-            )
-        } catch (_: Throwable) {
-            0
-        }
-    }
-
-    fun readEnd(): Int {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver,
-                Settings.System.GRADIENT_END_COLOR,
-                0,
-                UserHandle.USER_CURRENT,
-            )
-        } catch (_: Throwable) {
-            0
-        }
-    }
-
-    var startArgb by remember(contentResolver) { mutableIntStateOf(readStart()) }
-    var endArgb by remember(contentResolver) { mutableIntStateOf(readEnd()) }
-
-    DisposableEffect(contentResolver) {
-        startArgb = readStart()
-        endArgb = readEnd()
-        val observer =
-            object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    context.mainExecutor.execute {
-                        startArgb = readStart()
-                        endArgb = readEnd()
-                    }
-                }
-            }
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.GRADIENT_START_COLOR),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.GRADIENT_END_COLOR),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-        onDispose { contentResolver.unregisterContentObserver(observer) }
-    }
-
+    val startArgb = rememberSystemIntSetting(Settings.System.GRADIENT_START_COLOR, 0)
+    val endArgb = rememberSystemIntSetting(Settings.System.GRADIENT_END_COLOR, 0)
     return Pair(
         if (startArgb == 0) null else gradientSettingArgbToColor(startArgb),
         if (endArgb == 0) null else gradientSettingArgbToColor(endArgb),

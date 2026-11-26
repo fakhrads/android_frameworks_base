@@ -20,9 +20,7 @@ package com.android.systemui.qs.panels.ui.compose.infinitegrid
 
 import android.content.Context
 import android.content.res.Resources
-import android.database.ContentObserver
 import android.os.Trace
-import android.os.UserHandle
 import android.provider.Settings
 import android.service.quicksettings.Tile.STATE_ACTIVE
 import android.service.quicksettings.Tile.STATE_INACTIVE
@@ -52,11 +50,9 @@ import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -89,6 +85,9 @@ import com.android.compose.animation.bounceable
 import com.android.compose.animation.rememberExpandableController
 import com.android.compose.animation.scene.ContentScope
 import com.android.compose.modifiers.thenIf
+import com.android.compose.settings.rememberSecureIntSetting
+import com.android.compose.settings.rememberSecureStringSetting
+import com.android.compose.settings.rememberSystemIntSetting
 import com.android.compose.theme.LocalAndroidColorScheme
 import com.android.mechanics.compose.modifier.verticalFadeContentReveal
 import com.android.mechanics.compose.modifier.verticalTactileSurfaceReveal
@@ -688,45 +687,7 @@ object TileMotionTestKeys {
  */
 @Composable
 fun rememberTileShapeMode(): Int {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readShapeMode(): Int {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver,
-                Settings.System.QS_TILE_SHAPE,
-                0,
-                UserHandle.USER_CURRENT,
-            )
-        } catch (_: Throwable) {
-            0
-        }
-    }
-
-    var shapeMode by remember { mutableIntStateOf(readShapeMode()) }
-
-    DisposableEffect(contentResolver) {
-        // Scene-container QS can compose before Settings is ready; re-read on subscribe.
-        shapeMode = readShapeMode()
-        val observer =
-            object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    context.mainExecutor.execute { shapeMode = readShapeMode() }
-                }
-            }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_TILE_SHAPE),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-
-        onDispose { contentResolver.unregisterContentObserver(observer) }
-    }
-
-    return shapeMode
+    return rememberSystemIntSetting(Settings.System.QS_TILE_SHAPE, 0)
 }
 
 /**
@@ -735,45 +696,7 @@ fun rememberTileShapeMode(): Int {
  */
 @Composable
 fun rememberQSPanelStyle(): Boolean {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readPanelStyleEnabled(): Boolean {
-        return try {
-            Settings.Secure.getIntForUser(
-                contentResolver,
-                QS_PANEL_STYLE,
-                0,
-                UserHandle.USER_CURRENT,
-            ) != 0
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    var classicStyleEnabled by remember { mutableStateOf(readPanelStyleEnabled()) }
-
-    DisposableEffect(contentResolver) {
-        // Scene-container QS can compose before Settings is ready; re-read on subscribe.
-        classicStyleEnabled = readPanelStyleEnabled()
-        val observer =
-            object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    context.mainExecutor.execute { classicStyleEnabled = readPanelStyleEnabled() }
-                }
-            }
-
-        contentResolver.registerContentObserver(
-            Settings.Secure.getUriFor(QS_PANEL_STYLE),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-
-        onDispose { contentResolver.unregisterContentObserver(observer) }
-    }
-
-    return classicStyleEnabled
+    return rememberSecureIntSetting(QS_PANEL_STYLE, 0) != 0
 }
 
 /**
@@ -782,45 +705,7 @@ fun rememberQSPanelStyle(): Boolean {
  */
 @Composable
 fun rememberQSTileLabelHide(): Boolean {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readLabelHideEnabled(): Boolean {
-        return try {
-            Settings.Secure.getIntForUser(
-                contentResolver,
-                QS_TILE_LABEL_HIDE,
-                0,
-                UserHandle.USER_CURRENT,
-            ) != 0
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    var labelHideEnabled by remember { mutableStateOf(readLabelHideEnabled()) }
-
-    DisposableEffect(contentResolver) {
-        // Scene-container QS can compose before Settings is ready; re-read on subscribe.
-        labelHideEnabled = readLabelHideEnabled()
-        val observer =
-            object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    context.mainExecutor.execute { labelHideEnabled = readLabelHideEnabled() }
-                }
-            }
-
-        contentResolver.registerContentObserver(
-            Settings.Secure.getUriFor(QS_TILE_LABEL_HIDE),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-
-        onDispose { contentResolver.unregisterContentObserver(observer) }
-    }
-
-    return labelHideEnabled
+    return rememberSecureIntSetting(QS_TILE_LABEL_HIDE, 0) != 0
 }
 
 /**
@@ -829,45 +714,9 @@ fun rememberQSTileLabelHide(): Boolean {
  */
 @Composable
 fun rememberQSTileIconShapeKey(): String {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readIconShapeKey(): String {
-        return try {
-            Settings.Secure.getStringForUser(
-                    contentResolver,
-                    QS_TILE_ICON_SHAPE,
-                    UserHandle.USER_CURRENT,
-                )
-                ?.takeIf { QSTileIconShapes.isKnownKey(it) } ?: QSTileIconShapes.DEFAULT_KEY
-        } catch (_: Throwable) {
-            QSTileIconShapes.DEFAULT_KEY
-        }
-    }
-
-    var iconShapeKey by remember { mutableStateOf(readIconShapeKey()) }
-
-    DisposableEffect(contentResolver) {
-        // Scene-container QS can compose before Settings is ready; re-read on subscribe.
-        iconShapeKey = readIconShapeKey()
-        val observer =
-            object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    context.mainExecutor.execute { iconShapeKey = readIconShapeKey() }
-                }
-            }
-
-        contentResolver.registerContentObserver(
-            Settings.Secure.getUriFor(QS_TILE_ICON_SHAPE),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-
-        onDispose { contentResolver.unregisterContentObserver(observer) }
-    }
-
-    return iconShapeKey
+    return rememberSecureStringSetting(QS_TILE_ICON_SHAPE)?.takeIf {
+        QSTileIconShapes.isKnownKey(it)
+    } ?: QSTileIconShapes.DEFAULT_KEY
 }
 
 /**
@@ -876,86 +725,12 @@ fun rememberQSTileIconShapeKey(): String {
  */
 @Composable
 fun rememberQSTileAnimationStyle(): Int {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readAnimationStyle(): Int {
-        return try {
-            Settings.Secure.getIntForUser(
-                contentResolver,
-                QS_TILE_ANIMATION_STYLE,
-                0,
-                UserHandle.USER_CURRENT,
-            )
-        } catch (_: Throwable) {
-            0
-        }
-    }
-
-    var animationStyle by remember { mutableStateOf(readAnimationStyle()) }
-
-    DisposableEffect(contentResolver) {
-        // Scene-container QS can compose before Settings is ready; re-read on subscribe.
-        animationStyle = readAnimationStyle()
-        val observer =
-            object : ContentObserver(null) {
-                override fun onChange(selfChange: Boolean) {
-                    context.mainExecutor.execute { animationStyle = readAnimationStyle() }
-                }
-            }
-
-        contentResolver.registerContentObserver(
-            Settings.Secure.getUriFor(QS_TILE_ANIMATION_STYLE),
-            false,
-            observer,
-            UserHandle.USER_ALL,
-        )
-
-        onDispose { contentResolver.unregisterContentObserver(observer) }
-    }
-
-    return animationStyle
+    return rememberSecureIntSetting(QS_TILE_ANIMATION_STYLE, 0)
 }
 
 @Composable
 fun rememberQsGradientEnabled(): Boolean {
-    val context = LocalContext.current
-    val contentResolver = context.contentResolver
-
-    fun readGradientEnabled(): Boolean {
-        return try {
-            Settings.System.getIntForUser(
-                contentResolver, Settings.System.QS_TILE_GRADIENT_ENABLED, 1,
-                UserHandle.USER_CURRENT
-            ) == 1
-        } catch (_: Throwable) {
-            true
-        }
-    }
-
-    var gradientEnabled by remember(contentResolver) { mutableStateOf(readGradientEnabled()) }
-
-    DisposableEffect(contentResolver) {
-        gradientEnabled = readGradientEnabled()
-        val observer = object : ContentObserver(null) {
-            override fun onChange(selfChange: Boolean) {
-                context.mainExecutor.execute {
-                    gradientEnabled = readGradientEnabled()
-                }
-            }
-        }
-
-        contentResolver.registerContentObserver(
-            Settings.System.getUriFor(Settings.System.QS_TILE_GRADIENT_ENABLED),
-            false, observer, UserHandle.USER_ALL
-        )
-
-        onDispose {
-            contentResolver.unregisterContentObserver(observer)
-        }
-    }
-
-    return gradientEnabled
+    return rememberSystemIntSetting(Settings.System.QS_TILE_GRADIENT_ENABLED, 1) == 1
 }
 
 private object TileDefaults {

@@ -16,7 +16,6 @@
 
 package com.android.systemui.volume.dialog.sliders.ui
 
-import android.os.UserHandle
 import android.provider.Settings
 import android.view.View
 import androidx.compose.foundation.gestures.Orientation
@@ -34,11 +33,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.android.compose.settings.rememberSecureIntSetting
 import com.android.compose.theme.PlatformTheme
 import com.android.systemui.common.ui.compose.Icon
 import com.android.systemui.haptics.slider.SliderHapticFeedbackFilter
@@ -93,15 +92,7 @@ constructor(
 
 @Composable
 private fun rememberVolumeHapticsEnabled(): Boolean {
-    val context = LocalContext.current
-    return remember {
-        Settings.Secure.getIntForUser(
-            context.contentResolver,
-            Settings.Secure.VOLUME_DIALOG_HAPTIC_FEEDBACK,
-            1,
-            UserHandle.USER_CURRENT,
-        ) != 0
-    }
+    return rememberSecureIntSetting(Settings.Secure.VOLUME_DIALOG_HAPTIC_FEEDBACK, 1) != 0
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
