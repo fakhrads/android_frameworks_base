@@ -241,8 +241,15 @@ public class DisplayPolicy {
     BoostFramework mPerfBoostDrag = null;
     BoostFramework mPerfBoostFling = null;
     BoostFramework mPerfBoostPrefling = null;
-    /** Drag boost type, in the vendor perf config, for the moments after a drag ends. */
-    private static final int DRAG_END_BOOST_TYPE = 8;
+    /**
+     * Perf lock held for the moments after a drag ends: GPU min frequency (MHz) for
+     * DRAG_END_BOOST_MS. A direct lock rather than a VENDOR_HINT_DRAG_BOOST type, because
+     * scenariod rewrites the type of every drag hint to the app's workload class, which turns
+     * it into a drag boost with no timeout that nothing ever releases.
+     */
+    private static final int DRAG_END_BOOST_MS = 400;
+    private static final int PERF_GPU_MIN_FREQ = 0x4280C000;
+    private static final int DRAG_END_GPU_MIN_FREQ_MHZ = 688;
     BoostFramework mPerfBoostDragEnd = null;
     BoostFramework mPerf = new BoostFramework();
     private boolean mIsPerfBoostFlingAcquired;
@@ -823,12 +830,12 @@ public class DisplayPolicy {
                             if (!started && !isGame) {
                                 // The drag boost ends as the finger lifts, but what follows still
                                 // animates (the shade settling, a list snapping back): keep the GPU
-                                // floor for that with a short boost perfd times out by itself.
+                                // floor for that with a short lock perfd times out by itself.
                                 if (mPerfBoostDragEnd == null) {
                                     mPerfBoostDragEnd = new BoostFramework();
                                 }
-                                mPerfBoostDragEnd.perfHint(BoostFramework.VENDOR_HINT_DRAG_BOOST,
-                                        currentPackage, -1, DRAG_END_BOOST_TYPE);
+                                mPerfBoostDragEnd.perfLockAcquire(DRAG_END_BOOST_MS,
+                                        PERF_GPU_MIN_FREQ, DRAG_END_GPU_MIN_FREQ_MHZ);
                             }
                             if (SILKY_SCROLLS_ENABLE || SILKY_SCROLLS_LITE_ENABLE){
                             if(mPerfBoostDrag.board_first_api_lvl <= BoostFramework.VENDOR_V_API_LEVEL &&
