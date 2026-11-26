@@ -24,6 +24,11 @@ class MediaSessionTrackHelper private constructor(context: Context) {
 
     private var currentController: MediaController? = null
     private var controllerCallback: MediaController.Callback? = null
+
+    // The current controller's metadata and state, as its callbacks deliver them. Reading them from
+    // the controller is a binder call, and listeners read them on every change.
+    @Volatile private var currentMetadata: MediaMetadata? = null
+    @Volatile private var currentPlaybackState: PlaybackState? = null
     private var sessionsListening = false
 
     private val sessionsChangedListener = MediaSessionManager.OnActiveSessionsChangedListener {
@@ -54,15 +59,19 @@ class MediaSessionTrackHelper private constructor(context: Context) {
         controllerCallback?.let { cb -> currentController?.unregisterCallback(cb) }
         currentController = ctrl
         controllerCallback = null
+        currentMetadata = ctrl?.metadata
+        currentPlaybackState = ctrl?.playbackState
         if (ctrl == null) return
 
         val cb =
             object : MediaController.Callback() {
                 override fun onMetadataChanged(metadata: MediaMetadata?) {
+                    currentMetadata = metadata
                     notifyListeners()
                 }
 
                 override fun onPlaybackStateChanged(state: PlaybackState?) {
+                    currentPlaybackState = state
                     notifyListeners()
                 }
 
@@ -122,19 +131,20 @@ class MediaSessionTrackHelper private constructor(context: Context) {
                 }
                 currentController = null
                 controllerCallback = null
+                currentMetadata = null
+                currentPlaybackState = null
             }
         }
     }
 
-    fun getCurrentMediaMetadata(): MediaMetadata? = currentController?.metadata
+    fun getCurrentMediaMetadata(): MediaMetadata? = currentMetadata
 
-    fun getMediaControllerPlaybackState(): PlaybackState? = currentController?.playbackState
+    fun getMediaControllerPlaybackState(): PlaybackState? = currentPlaybackState
 
-    fun isMediaPlaying(): Boolean =
-        currentController?.playbackState?.state == PlaybackState.STATE_PLAYING
+    fun isMediaPlaying(): Boolean = currentPlaybackState?.state == PlaybackState.STATE_PLAYING
 
     fun getMediaBitmap(): Bitmap? =
-        currentController?.metadata?.let {
+        currentMetadata?.let {
             it.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
                 ?: it.getBitmap(MediaMetadata.METADATA_KEY_ART)
                 ?: it.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
