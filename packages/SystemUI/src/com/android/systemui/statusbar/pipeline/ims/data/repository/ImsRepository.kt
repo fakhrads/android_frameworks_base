@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.scan
@@ -115,8 +116,14 @@ class ImsRepositoryImpl(
                 cause is ImsException && cause.code == ImsException.CODE_ERROR_SERVICE_UNAVAILABLE
             }
             .catch { /* Nothing */ }
+            // Registering and unregistering the IMS callbacks are binder calls to the phone process.
+            .flowOn(bgDispatcher)
             .scan(initial = initial) { state, event -> state.applyEvent(event) }
-            .stateIn(scope = scope, started = SharingStarted.WhileSubscribed(), initial)
+            .stateIn(
+                scope = scope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
+                initial,
+            )
     }
 
     override val imsState: StateFlow<ImsStateModel> =
@@ -138,7 +145,17 @@ class ImsRepositoryImpl(
                 )
             }
             .catch { emit(ImsStateModel()) /* on exception, just return default value */ }
-            .stateIn(scope, SharingStarted.WhileSubscribed(), ImsStateModel())
+            // The slot index and the active subscription count are binder calls too.
+            .flowOn(bgDispatcher)
+            .stateIn(scope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ImsStateModel())
+
+    private companion object {
+        /**
+         * The status bar icons stop collecting while the shade is open. Keep the callbacks for a
+         * while so that opening and closing the shade does not register them all over again.
+         */
+        const val STOP_TIMEOUT_MS = 5_000L
+    }
 
     class Factory
     @Inject
