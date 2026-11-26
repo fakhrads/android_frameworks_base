@@ -18,7 +18,9 @@ package com.android.systemui.statusbar.quickactions.island.ui.compose
 
 import android.media.audiofx.Visualizer
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
+import android.os.Process
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,73 +61,19 @@ fun AudioReactiveBars(
             DefaultReactiveLevels[3],
         )
     }
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-
     DisposableEffect(isPlaying) {
         if (!isPlaying) {
             DefaultReactiveLevels.forEachIndexed { index, level -> levels[index] = level }
             onDispose {}
         } else {
-            var visualizer: Visualizer? = null
-            val listener =
-                object : Visualizer.OnDataCaptureListener {
-                    override fun onWaveFormDataCapture(
-                        visualizer: Visualizer?,
-                        waveform: ByteArray?,
-                        samplingRate: Int,
-                    ) {
-                        val safeWaveform = waveform ?: return
-                        if (safeWaveform.isEmpty()) return
-
-                        val quarter = safeWaveform.size / 4
-                        val secondQuarter = quarter * 2
-                        val thirdQuarter = quarter * 3
-                        val newLevels =
-                            floatArrayOf(
-                                safeWaveform.windowEnergy(0, quarter),
-                                safeWaveform.windowEnergy(quarter, secondQuarter),
-                                safeWaveform.windowEnergy(secondQuarter, thirdQuarter),
-                                safeWaveform.windowEnergy(thirdQuarter, safeWaveform.size),
-                            )
-
-                        mainHandler.post {
-                            for (index in newLevels.indices) {
-                                levels[index] =
-                                    (levels[index] * 0.65f + newLevels[index] * 0.35f)
-                                        .coerceIn(0.1f, 1f)
-                            }
-                        }
-                    }
-
-                    override fun onFftDataCapture(
-                        visualizer: Visualizer?,
-                        fft: ByteArray?,
-                        samplingRate: Int,
-                    ) = Unit
+            val listener: (FloatArray) -> Unit = { newLevels ->
+                for (index in newLevels.indices) {
+                    levels[index] =
+                        (levels[index] * 0.65f + newLevels[index] * 0.35f).coerceIn(0.1f, 1f)
                 }
-
-            runCatching {
-                    visualizer =
-                        Visualizer(0).apply {
-                            val captureSizes = Visualizer.getCaptureSizeRange()
-                            captureSize = captureSizes[1].coerceAtMost(256)
-                            setDataCaptureListener(
-                                listener,
-                                Visualizer.getMaxCaptureRate() / 2,
-                                true,
-                                false,
-                            )
-                            enabled = true
-                        }
-                }
-                .onFailure {
-                    DefaultReactiveLevels.forEachIndexed { index, level -> levels[index] = level }
-                }
-
-            onDispose {
-                runCatching { visualizer?.enabled = false }
-                runCatching { visualizer?.release() }
             }
+            SharedWaveformVisualizer.subscribe(listener)
+            onDispose { SharedWaveformVisualizer.unsubscribe(listener) }
         }
     }
 
@@ -163,4 +111,104 @@ private fun ByteArray.windowEnergy(start: Int, end: Int): Float {
 
     if (count == 0) return 0.1f
     return sqrt(sum / count).coerceIn(0.1f, 1f)
+}
+
+/**
+ * One waveform [Visualizer] for every [AudioReactiveBars] in the process.
+ *
+ * Creating a visualizer opens an effect in the audio HAL (tens of milliseconds), and releasing it
+ * closes the effect again. The bars leave and re-enter the composition whenever the shade opens
+ * and closes, so the visualizer is created and released on a background thread, is shared, and is
+ * kept for a few seconds after the last subscriber leaves. Its capture callbacks also run on that
+ * thread; subscribers get the levels on the main thread.
+ */
+private object SharedWaveformVisualizer {
+    private const val RELEASE_DELAY_MS = 3_000L
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val handler: Handler by lazy {
+        val thread = HandlerThread("AudioReactiveBars", Process.THREAD_PRIORITY_BACKGROUND)
+        thread.start()
+        Handler(thread.looper)
+    }
+
+    // Touched only on the main thread.
+    private val subscribers = mutableListOf<(FloatArray) -> Unit>()
+
+    // Touched only on [handler]'s thread.
+    private var visualizer: Visualizer? = null
+
+    private val releaseRunnable = Runnable { releaseVisualizer() }
+
+    private val captureListener =
+        object : Visualizer.OnDataCaptureListener {
+            override fun onWaveFormDataCapture(
+                visualizer: Visualizer?,
+                waveform: ByteArray?,
+                samplingRate: Int,
+            ) {
+                val safeWaveform = waveform ?: return
+                if (safeWaveform.isEmpty()) return
+
+                val quarter = safeWaveform.size / 4
+                val secondQuarter = quarter * 2
+                val thirdQuarter = quarter * 3
+                val newLevels =
+                    floatArrayOf(
+                        safeWaveform.windowEnergy(0, quarter),
+                        safeWaveform.windowEnergy(quarter, secondQuarter),
+                        safeWaveform.windowEnergy(secondQuarter, thirdQuarter),
+                        safeWaveform.windowEnergy(thirdQuarter, safeWaveform.size),
+                    )
+                mainHandler.post { subscribers.forEach { it(newLevels) } }
+            }
+
+            override fun onFftDataCapture(
+                visualizer: Visualizer?,
+                fft: ByteArray?,
+                samplingRate: Int,
+            ) = Unit
+        }
+
+    /** Main thread. */
+    fun subscribe(listener: (FloatArray) -> Unit) {
+        subscribers += listener
+        if (subscribers.size == 1) {
+            handler.removeCallbacks(releaseRunnable)
+            handler.post { ensureVisualizer() }
+        }
+    }
+
+    /** Main thread. */
+    fun unsubscribe(listener: (FloatArray) -> Unit) {
+        subscribers -= listener
+        if (subscribers.isEmpty()) handler.postDelayed(releaseRunnable, RELEASE_DELAY_MS)
+    }
+
+    private fun ensureVisualizer() {
+        if (visualizer != null) return
+        // Created on this thread, so its capture callbacks are delivered here too.
+        visualizer =
+            runCatching {
+                    Visualizer(0).apply {
+                        val captureSizes = Visualizer.getCaptureSizeRange()
+                        captureSize = captureSizes[1].coerceAtMost(256)
+                        setDataCaptureListener(
+                            captureListener,
+                            Visualizer.getMaxCaptureRate() / 2,
+                            true,
+                            false,
+                        )
+                        enabled = true
+                    }
+                }
+                .getOrNull()
+    }
+
+    private fun releaseVisualizer() {
+        val current = visualizer ?: return
+        visualizer = null
+        runCatching { current.enabled = false }
+        runCatching { current.release() }
+    }
 }
