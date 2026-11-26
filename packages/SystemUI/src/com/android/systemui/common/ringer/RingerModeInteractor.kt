@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlin.math.roundToInt
 
@@ -84,7 +85,10 @@ class RingerModeInteractorImpl(
         val appContext = context.applicationContext ?: context
         appContext.registerReceiver(receiver, filter)
         awaitClose { appContext.unregisterReceiver(receiver) }
-    }.distinctUntilChanged()
+    }
+        // Reading the mode and registering the receiver are binder calls.
+        .flowOn(Dispatchers.IO)
+        .distinctUntilChanged()
 
     override val dndMode: Flow<Boolean> = callbackFlow {
         trySend(isDndEnabled())
@@ -101,7 +105,10 @@ class RingerModeInteractorImpl(
         val appContext = context.applicationContext ?: context
         appContext.registerReceiver(receiver, filter)
         awaitClose { appContext.unregisterReceiver(receiver) }
-    }.distinctUntilChanged()
+    }
+        // Reading the mode and registering the receiver are binder calls.
+        .flowOn(Dispatchers.IO)
+        .distinctUntilChanged()
 
     override fun getCurrentMode(): Int = audioManager.ringerModeInternal
 

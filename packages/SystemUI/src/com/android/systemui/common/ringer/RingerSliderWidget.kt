@@ -59,10 +59,14 @@ fun RingerSliderWidget(
     val numModes = interactor.getNumberOfModes()
     val maxOffset = interactor.getMaxOffset()
 
+    // The initial values are binder calls; read them once, not on every recomposition.
+    val initialTargetPosition =
+        remember(interactor) { interactor.getTargetPosition(interactor.getCurrentMode()) }
+    val initialDndEnabled = remember(interactor) { interactor.isDndEnabled() }
     val targetPosition by interactor.targetPositionFlow.collectAsState(
-        initial = interactor.getTargetPosition(interactor.getCurrentMode())
+        initial = initialTargetPosition
     )
-    val isDndEnabled by interactor.dndMode.collectAsState(initial = interactor.isDndEnabled())
+    val isDndEnabled by interactor.dndMode.collectAsState(initial = initialDndEnabled)
 
     var dragOffset by remember { mutableStateOf(targetPosition) }
     var isDragging by remember { mutableStateOf(false) }
