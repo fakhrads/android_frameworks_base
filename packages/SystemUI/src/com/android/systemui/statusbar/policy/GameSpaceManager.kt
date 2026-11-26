@@ -23,9 +23,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.Message
 import android.os.PowerManager
+import android.os.Process
 import android.os.RemoteException
 import android.os.UserHandle
 import android.provider.Settings
@@ -41,10 +43,17 @@ class GameSpaceManager @Inject constructor(
     private val context: Context,
     private val keyguardStateController: KeyguardStateController,
 ) {
-    private val handler by lazy { GameSpaceHandler(Looper.getMainLooper()) }
+    // Every check is binder calls (focused task, game list setting, interactive state, broadcast),
+    // run on each task change, so it runs off the main thread.
+    private val handler by lazy {
+        val thread = HandlerThread("GameSpaceManager", Process.THREAD_PRIORITY_BACKGROUND)
+        thread.start()
+        GameSpaceHandler(thread.looper)
+    }
     private val taskManager by lazy { ActivityTaskManager.getService() }
 
-    private var activeGame: String? = null
+    // Written on the handler thread, read from the notification launch path.
+    @Volatile private var activeGame: String? = null
     private var isRegistered = false
 
     private val taskStackChangeListener = object : TaskStackChangeListener {
