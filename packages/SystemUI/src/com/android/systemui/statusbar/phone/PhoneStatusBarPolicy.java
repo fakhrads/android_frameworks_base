@@ -679,25 +679,26 @@ public class PhoneStatusBarPolicy
                                         }
                                     }
                                     final boolean finalRequestsInternet = requestsInternet;
-                                    mMainExecutor.execute(() -> {
-                                        boolean isLauncher = false;
-                                        List<ResolveInfo> homeActivities = mContext
-                                                .getPackageManager().queryIntentActivitiesAsUser(
-                                                        new Intent(Intent.ACTION_MAIN)
-                                                                .addCategory(Intent.CATEGORY_HOME)
-                                                                .addCategory(
-                                                                        Intent.CATEGORY_DEFAULT),
-                                                        PackageManager.ResolveInfoFlags.of(0),
-                                                        UserHandle.getUserId(uid));
-                                        for (ResolveInfo homeActivity : homeActivities) {
-                                            int homeUid =
-                                                    homeActivity.activityInfo.applicationInfo.uid;
-                                            if (uid == homeUid) {
-                                                isLauncher = true;
-                                                break;
-                                            }
+                                    // Resolving the home activities is a binder call: keep it on
+                                    // this background executor rather than the main thread.
+                                    boolean isLauncher = false;
+                                    List<ResolveInfo> homeActivities = pm
+                                            .queryIntentActivitiesAsUser(
+                                                    new Intent(Intent.ACTION_MAIN)
+                                                            .addCategory(Intent.CATEGORY_HOME)
+                                                            .addCategory(Intent.CATEGORY_DEFAULT),
+                                                    PackageManager.ResolveInfoFlags.of(0),
+                                                    UserHandle.getUserId(uid));
+                                    for (ResolveInfo homeActivity : homeActivities) {
+                                        int homeUid =
+                                                homeActivity.activityInfo.applicationInfo.uid;
+                                        if (uid == homeUid) {
+                                            isLauncher = true;
+                                            break;
                                         }
-                                        final boolean finalIsLauncher = isLauncher;
+                                    }
+                                    final boolean finalIsLauncher = isLauncher;
+                                    mMainExecutor.execute(() -> {
                                         final boolean showIcon;
                                         if (!finalIsLauncher
                                                 && finalRequestsInternet
