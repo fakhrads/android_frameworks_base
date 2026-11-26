@@ -2613,6 +2613,12 @@ public class RootWindowContainer extends WindowContainer<DisplayContent>
 
                     QtiBackgroundManager.getInstance().freezeProcessLevel(
                             r.packageName, QtiBackgroundManager.WARM_LAUNCH_FREEZE);
+
+                    // The record can be a stopped one whose process was killed: that is a cold
+                    // launch, so it gets the full launch boost (CLO b48d6010246f).
+                    if (!mTmpFindTaskResult.mIdealRecord.attachedToProcess()) {
+                        acquireAppLaunchPerfLock(r);
+                    }
                 }
                 return mTmpFindTaskResult.mIdealRecord;
             } else if (mTmpFindTaskResult.mCandidateRecord != null) {
@@ -2623,11 +2629,21 @@ public class RootWindowContainer extends WindowContainer<DisplayContent>
         /* Acquire perf lock *only* during new app launch */
         if ((mTmpFindTaskResult.mIdealRecord == null) ||
             (mTmpFindTaskResult.mIdealRecord.getState() == DESTROYED)) {
-            if (r != null && r.isMainIntent(r.intent)) {
-                acquireAppLaunchPerfLock(r);
-                QtiBackgroundManager.getInstance().freezeProcessLevel(
-                        r.packageName, QtiBackgroundManager.FIRST_LAUNCH_FREEZE);
-            } else if (r == null) {
+            if (r != null) {
+                // A launch through a non-main intent (some games) whose process is not running is
+                // a cold launch too; one inside a running app still gets no boost (CLO
+                // b48d6010246f).
+                final WindowProcessController wpcCheck =
+                        (r.info != null && r.info.applicationInfo != null)
+                        ? mService.getProcessController(r.processName, r.info.applicationInfo.uid)
+                        : null;
+                final boolean isProcessRunning = wpcCheck != null && wpcCheck.hasThread();
+                if (r.isMainIntent(r.intent) || !isProcessRunning) {
+                    acquireAppLaunchPerfLock(r);
+                    QtiBackgroundManager.getInstance().freezeProcessLevel(
+                            r.packageName, QtiBackgroundManager.FIRST_LAUNCH_FREEZE);
+                }
+            } else {
                 Slog.w(TAG, "Should not happen! Didn't apply launch boost");
             }
         }
