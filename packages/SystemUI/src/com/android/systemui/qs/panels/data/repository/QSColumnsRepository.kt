@@ -27,16 +27,23 @@ import androidx.annotation.IntegerRes
 import com.android.systemui.common.ui.data.repository.ConfigurationRepository
 import com.android.systemui.dagger.SysUISingleton
 import com.android.systemui.dagger.qualifiers.Application
+import com.android.systemui.dagger.qualifiers.Background
 import com.android.systemui.res.R
 import com.android.systemui.shade.ShadeDisplayAware
 import com.android.systemui.util.kotlin.emitOnStart
 import com.android.systemui.util.kotlin.mapDirect
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.shareIn
 
 @SysUISingleton
 class QSColumnsRepository
@@ -45,7 +52,21 @@ constructor(
     @Application private val context: Context,
     @ShadeDisplayAware private val resources: Resources,
     @ShadeDisplayAware private val configurationRepository: ConfigurationRepository,
+    @Background private val backgroundDispatcher: CoroutineDispatcher? = null,
+    @Application private val applicationScope: CoroutineScope? = null,
 ) {
+    /**
+     * Shares a flow that reads settings among its collectors and does the reads, and the observer
+     * registration, in the background. Quick settings view models collect these flows each time the
+     * shade opens; each collection used to register observers and read settings over binder on the
+     * main thread. Sharing starts eagerly so a new collector gets the value at once.
+     */
+    private fun <T> Flow<T>.shareInBackground(): Flow<T> {
+        val scope = applicationScope ?: return this
+        return flowOn(backgroundDispatcher ?: Dispatchers.Default)
+            .shareIn(scope, SharingStarted.Eagerly, replay = 1)
+    }
+
     private fun settingsChanges(vararg keys: String): Flow<Unit> = callbackFlow {
         val observer =
             object : ContentObserver(null) {
@@ -90,6 +111,7 @@ constructor(
             )
             .emitOnStart()
             .mapDirect { readColumnsWithDefault(defaultResId) }
+            .shareInBackground()
 
     private fun resourceColumns(@IntegerRes resId: Int): Flow<Int> =
         configurationRepository.onConfigurationChange.emitOnStart().mapDirect {
@@ -147,6 +169,7 @@ constructor(
             .emitOnStart()
             .mapDirect { readClassicColumns(portraitKey, landscapeKey) }
             .distinctUntilChanged()
+            .shareInBackground()
 
     private fun readClassicColumns(portraitKey: String, landscapeKey: String): Int {
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
