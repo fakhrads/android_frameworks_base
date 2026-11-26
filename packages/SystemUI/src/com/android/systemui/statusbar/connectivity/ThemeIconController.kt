@@ -23,11 +23,13 @@ import android.graphics.Canvas
 import android.graphics.Rect
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.os.SystemClock
 import android.view.ViewGroup
 import android.widget.ImageView
 import com.android.systemui.qs.tileimpl.QSTileImpl
 import com.android.systemui.res.R
 import com.android.systemui.statusbar.core.NewStatusBarIcons
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -68,6 +70,70 @@ object ThemeIconController {
     private val refreshCallbacks = CopyOnWriteArrayList<Runnable>()
     @Volatile private var wifiResIds: IntArray? = null
 
+    /*
+     * Answers from the theme engine service. The status bar binders ask on every icon update,
+     * inside frames, and each question is a binder call (and a themed icon is also rescaled and
+     * trimmed pixel by pixel), so the answers are kept until the theme changes.
+     */
+    private const val CACHE_RESUME_DELAY_MS = 5_000L
+    private val targetedCache = ConcurrentHashMap<String, Boolean>()
+    private val enabledPackageCache = ConcurrentHashMap<String, String>()
+    private val themedBitmapCache = ConcurrentHashMap<String, Bitmap>()
+    private val missingThemedIcons = ConcurrentHashMap.newKeySet<String>()
+
+    /** The engine reloads for a while after a change; answers given then are not kept. */
+    @Volatile private var cacheResumesAt = 0L
+
+    private val cacheEnabled: Boolean
+        get() = SystemClock.uptimeMillis() >= cacheResumesAt
+
+    private fun clearThemeCaches() {
+        cacheResumesAt = SystemClock.uptimeMillis() + CACHE_RESUME_DELAY_MS
+        targetedCache.clear()
+        enabledPackageCache.clear()
+        themedBitmapCache.clear()
+        missingThemedIcons.clear()
+    }
+
+    private fun isTargeted(engine: ThemeEngine, name: String): Boolean {
+        if (!cacheEnabled) return engine.isTargetedResource(name)
+        return targetedCache[name]
+            ?: engine.isTargetedResource(name).also { targetedCache[name] = it }
+    }
+
+    private fun enabledPackage(engine: ThemeEngine, category: String): String {
+        if (!cacheEnabled) return engine.getEnabledPackage(category).orEmpty()
+        return enabledPackageCache[category]
+            ?: engine.getEnabledPackage(category).orEmpty().also {
+                enabledPackageCache[category] = it
+            }
+    }
+
+    /** The themed icon [name] scaled to [size], or null when the theme has none. */
+    private fun themedIcon(
+        context: Context,
+        engine: ThemeEngine,
+        name: String,
+        size: IconSize,
+    ): Drawable? {
+        val key = "$name/${size.width}x${size.height}"
+        val caching = cacheEnabled
+        if (caching) {
+            themedBitmapCache[key]?.let {
+                return BitmapDrawable(context.resources, it)
+            }
+            if (key in missingThemedIcons) return null
+        }
+        val source = engine.getSystemThemeIconDrawable(name)
+        if (source == null) {
+            if (caching) missingThemedIcons += key
+            return null
+        }
+        val scaled = scaleBitmap(source, size)
+        if (caching) themedBitmapCache[key] = scaled
+        return BitmapDrawable(context.resources, scaled)
+    }
+
     @JvmStatic
     fun registerRefreshCallback(callback: Runnable) {
         refreshCallbacks.add(callback)
@@ -80,6 +146,7 @@ object ThemeIconController {
 
     @JvmStatic
     fun onThemeChanged(tiles: Collection<com.android.systemui.plugins.qs.QSTile>) {
+        clearThemeCaches()
         QSTileImpl.ResourceIcon.clearCache()
         for (tile in tiles) {
             tile.refreshState()
@@ -98,7 +165,7 @@ object ThemeIconController {
         val level = mapWifiResIdToLevel(context, resId)
         if (level < 0) return false
         val engine = ThemeEngine.getInstance(context) ?: return false
-        return engine.isTargetedResource(WIFI_ICON_NAMES[level])
+        return isTargeted(engine, WIFI_ICON_NAMES[level])
     }
 
     /** True when the active system theme lists this signal level (see [getThemedSignalIcon]). */
@@ -107,7 +174,7 @@ object ThemeIconController {
         val names = if (numLevels > 5) SIGNAL_5BAR_NAMES else SIGNAL_4BAR_NAMES
         if (level < 0 || level >= names.size) return false
         val engine = ThemeEngine.getInstance(context) ?: return false
-        return engine.isTargetedResource(names[level])
+        return isTargeted(engine, names[level])
     }
 
     /**
@@ -141,8 +208,7 @@ object ThemeIconController {
     ): Boolean {
         val engine = ThemeEngine.getInstance(context) ?: return false
         for (key in categoryKeys) {
-            val pkg = engine.getEnabledPackage(key) ?: continue
-            if (pkg.isNotEmpty()) return true
+            if (enabledPackage(engine, key).isNotEmpty()) return true
         }
         return false
     }
@@ -215,14 +281,13 @@ object ThemeIconController {
         val engine = ThemeEngine.getInstance(context) ?: return null
         val names = if (numLevels > 5) SIGNAL_5BAR_NAMES else SIGNAL_4BAR_NAMES
         if (level < 0 || level >= names.size) return null
-        val d = engine.getSystemThemeIconDrawable(names[level]) ?: return null
-        return scaleDrawable(context, d, getSignalIconSize(context))
+        return themedIcon(context, engine, names[level], getSignalIconSize(context))
     }
 
     @JvmStatic
     fun hasThemedSignalIcons(context: Context): Boolean {
         val engine = ThemeEngine.getInstance(context) ?: return false
-        return engine.isTargetedResource(SIGNAL_4BAR_NAMES[0])
+        return isTargeted(engine, SIGNAL_4BAR_NAMES[0])
     }
 
     @JvmStatic
@@ -230,8 +295,7 @@ object ThemeIconController {
         val level = mapWifiResIdToLevel(context, resId)
         if (level < 0) return null
         val engine = ThemeEngine.getInstance(context) ?: return null
-        val d = engine.getSystemThemeIconDrawable(WIFI_ICON_NAMES[level]) ?: return null
-        return scaleDrawable(context, d, getWifiIconSize(context))
+        return themedIcon(context, engine, WIFI_ICON_NAMES[level], getWifiIconSize(context))
     }
 
     @JvmStatic
@@ -302,7 +366,7 @@ object ThemeIconController {
             context.resources.getDimensionPixelSize(heightRes),
         )
 
-    private fun scaleDrawable(context: Context, d: Drawable, size: IconSize): Drawable {
+    private fun scaleBitmap(d: Drawable, size: IconSize): Bitmap {
         val width = size.width.coerceAtLeast(1)
         val height = size.height.coerceAtLeast(1)
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -318,7 +382,7 @@ object ThemeIconController {
         d.setBounds(left, top, left + scaledWidth, top + scaledHeight)
         d.draw(canvas)
         d.setBounds(oldBounds)
-        return BitmapDrawable(context.resources, bitmap.trimTransparentPadding())
+        return bitmap.trimTransparentPadding()
     }
 
     private fun Bitmap.trimTransparentPadding(): Bitmap {
