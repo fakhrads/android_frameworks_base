@@ -961,7 +961,7 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
             mAboveShelfChangedListener.onAboveShelfStateChanged(!wasAboveShelf);
         }
         if (notificationRowTransparency()) {
-            updateBackgroundTint();
+            updateHeadsUpBackground();
         }
     }
 
@@ -1045,7 +1045,7 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
         super.markHeadsUpSeen();
         mMustStayOnScreen = false;
         if (notificationRowTransparency()) {
-            updateBackgroundTint();
+            updateHeadsUpBackground();
         }
     }
 
@@ -1314,7 +1314,7 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
         }
 
         if (notificationRowTransparency()) {
-            updateBackgroundTint();
+            updateHeadsUpBackground();
         }
         setChronometerRunning(mLastChronometerRunning);
         if (isAboveShelf() != wasAboveShelf) {
@@ -1871,7 +1871,7 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
             mAboveShelfChangedListener.onAboveShelfStateChanged(!wasAboveShelf);
         }
         if (notificationRowTransparency()) {
-            updateBackgroundTint();
+            updateHeadsUpBackground();
         }
     }
 
@@ -4734,9 +4734,23 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
         // Row background should be opaque when it's displayed as a heads-up notification or
         // displayed on keyguard.
         // Also, for an unpinned HUN on the unlocked shade, the row bg should be transparent.
+        // With Settings.System.HEADS_UP_BLUR on, a heads-up stays frosted like the shade's rows.
+        boolean opaqueHeadsUp = (mustStayOnScreen() || mHeadsupDisappearRunning)
+                && !HeadsUpBlurSetting.isEnabled();
         return super.usesTransparentBackground()
-                && !mustStayOnScreen()
-                && !(isChildInGroup() && !mNotificationParent.usesTransparentBackground())
-                && !mHeadsupDisappearRunning;
+                && !opaqueHeadsUp
+                && !(isChildInGroup() && !mNotificationParent.usesTransparentBackground());
+    }
+
+    /**
+     * The heads-up state decides whether the background is transparent: retint it, and create or
+     * drop its blur to match. A blur kept under an opaque heads-up still sends its region to
+     * SurfaceFlinger, blurring behind a fill that hides it.
+     */
+    private void updateHeadsUpBackground() {
+        updateBackgroundTint();
+        if (mBackgroundNormal != null) {
+            mBackgroundNormal.setBlurBackgroundEnabled(usesBlurredBackground());
+        }
     }
 }

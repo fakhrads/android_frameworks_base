@@ -5522,6 +5522,13 @@ public final class Settings {
         public static final String BLUR_INTENSITY = "blur_intensity";
 
         /**
+         * Whether heads-up notifications use the same blurred, translucent background as the
+         * notification shade's rows (1, the default) or the opaque one (0).
+         * @hide
+         */
+        public static final String HEADS_UP_BLUR = "heads_up_blur";
+
+        /**
          * The user selected min refresh rate in frames per second. If infinite, the user wants
          * the highest possible refresh rate.
          *

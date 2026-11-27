@@ -862,6 +862,8 @@ public class CentralSurfacesImpl implements CoreStartable, CentralSurfaces,
         mContext.getContentResolver().registerContentObserver(
                 blurIntensity, false, contentObserver);
         contentObserver.onChange(true, blurIntensity);
+        com.android.systemui.statusbar.notification.row.HeadsUpBlurSetting.observe(
+                mContext.getContentResolver());
 
         ContentObserver brightnessControlObserver = new ContentObserver(null) {
             @Override
