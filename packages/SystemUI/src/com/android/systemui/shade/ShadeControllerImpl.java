@@ -17,6 +17,7 @@
 package com.android.systemui.shade;
 
 import android.content.ComponentCallbacks2;
+import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -53,9 +54,14 @@ public final class ShadeControllerImpl extends BaseShadeControllerImpl {
 
     private static final String TAG = "ShadeControllerImpl";
     private static final boolean SPEW = false;
+    private static final long TRIM_AFTER_COLLAPSE_DELAY_MS = 1000;
 
     private final CommandQueue mCommandQueue;
     private final Executor mMainExecutor;
+    // Trims the rendering caches once the collapsed shade has stopped drawing; see
+    // makeExpandedInvisible
+    private final Handler mTrimHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mTrimAfterCollapse = this::trimAfterCollapse;
     private final WindowRootViewVisibilityInteractor mWindowRootViewVisibilityInteractor;
     private final KeyguardStateController mKeyguardStateController;
     private final NotificationShadeWindowController mNotificationShadeWindowController;
@@ -286,6 +292,8 @@ public final class ShadeControllerImpl extends BaseShadeControllerImpl {
         }
 
         mExpandedVisible = true;
+        // Opened again before the trim: keep the caches it would have thrown away
+        mTrimHandler.removeCallbacks(mTrimAfterCollapse);
 
         // Expand the window to encompass the full screen in anticipation of the drag.
         // It's only possible to do atomically because the status bar is at the top of the screen!
@@ -337,7 +345,19 @@ public final class ShadeControllerImpl extends BaseShadeControllerImpl {
 
         // Trimming will happen later if Keyguard is showing - doing it here might cause a jank in
         // the bouncer appear animation.
+        // Not right away either: the trim runs on the render thread ahead of the next frame, and
+        // waits for the GPU and drops the texture and glyph caches while the last frames of the
+        // collapse are still drawing. In traces that made the frame ending the collapse 34-41 ms,
+        // with the trim (8-15 ms) and the graphics pipeline built again after it (14 ms). Wait
+        // until the shade has stopped drawing, and skip it if the shade opens again first.
         if (!mKeyguardStateController.isShowing()) {
+            mTrimHandler.removeCallbacks(mTrimAfterCollapse);
+            mTrimHandler.postDelayed(mTrimAfterCollapse, TRIM_AFTER_COLLAPSE_DELAY_MS);
+        }
+    }
+
+    private void trimAfterCollapse() {
+        if (!mExpandedVisible && !mKeyguardStateController.isShowing()) {
             WindowManagerGlobal.getInstance().trimMemory(ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN);
         }
     }
