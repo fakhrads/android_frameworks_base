@@ -256,11 +256,11 @@ public class DisplayPolicy {
 
     /**
      * Refresh rate update for the vendor perf HAL (the hint type carries the fps). perfd picks
-     * the fps specific variants of its boosts by this rate; without an update it keeps the rate
-     * it read from the panel when it started early in boot, before the display mode was set.
+     * the fps specific variants of its boosts by the last rate it was sent (scenariod's
+     * FpsUpdateAction, which starts at 0); without an update it keeps the default variants.
      */
     private static final int VENDOR_HINT_FPS_UPDATE = 0x00001094;
-    private BoostFramework mPerfFps;
+    private volatile BoostFramework mPerfFps;
     private int mPerfFpsSent;
     private final DisplayManager.DisplayListener mPerfFpsListener =
             new DisplayManager.DisplayListener() {
@@ -1022,9 +1022,12 @@ public class DisplayPolicy {
             mPerfFps = new BoostFramework();
             final DisplayManager dm = mContext.getSystemService(DisplayManager.class);
             if (dm != null) {
-                // Mode changes come as display changes; the hint is a binder call to the perf
-                // HAL, so keep it off the window manager and UI threads.
-                dm.registerDisplayListener(mPerfFpsListener, BackgroundThread.getHandler());
+                // A mode switch between rates of the same size is a refresh rate event, not a
+                // basic display change, so ask for those explicitly. The hint is a binder call
+                // to the perf HAL: keep it off the window manager and UI threads.
+                dm.registerDisplayListener(mPerfFpsListener, BackgroundThread.getHandler(),
+                        DisplayManager.EVENT_TYPE_DISPLAY_CHANGED
+                                | DisplayManager.EVENT_TYPE_DISPLAY_REFRESH_RATE);
             }
             BackgroundThread.getHandler().post(this::notifyPerfFps);
         }
@@ -1238,6 +1241,14 @@ public class DisplayPolicy {
     /** It is called after {@link #finishScreenTurningOn}. This runs on PowerManager's thread. */
     public void screenTurnedOn() {
         onDisplaySwitchFinished();
+        if (mPerfFps != null) {
+            // Send the rate again even if unchanged, in case the perf HAL missed it (it was not
+            // up yet at boot, or restarted); perfd ignores an update to the rate it already has.
+            BackgroundThread.getHandler().post(() -> {
+                mPerfFpsSent = 0;
+                notifyPerfFps();
+            });
+        }
     }
 
     /** It is called after {@link #screenTurningOn}. This runs on PowerManager's thread. */
