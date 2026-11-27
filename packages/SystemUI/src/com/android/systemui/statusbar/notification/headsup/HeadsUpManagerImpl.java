@@ -29,6 +29,7 @@ import android.os.UserHandle;
 import android.provider.Settings;
 import android.util.ArrayMap;
 import android.util.ArraySet;
+import android.util.BoostFramework;
 import android.util.Log;
 import android.view.accessibility.AccessibilityManager;
 
@@ -36,6 +37,7 @@ import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.logging.MetricsLogger;
 import com.android.internal.logging.UiEvent;
 import com.android.internal.logging.UiEventLogger;
+import com.android.internal.os.BackgroundThread;
 import com.android.internal.policy.SystemBarUtils;
 import com.android.systemui.EventLogTags;
 import com.android.systemui.dagger.SysUISingleton;
@@ -122,6 +124,19 @@ public class HeadsUpManagerImpl
     private final int mMinimumDisplayTimeForUserInitiated;
     private final int mStickyForSomeTimeAutoDismissTime;
     private final DelayableExecutor mExecutor;
+
+    // A heads-up notification sliding in or out animates while nothing else on screen moves, so
+    // no touch boost covers it. Over the launcher's blurred dock SurfaceFlinger composes every such
+    // frame on the GPU, and at the governor's 510 MHz it missed its deadline about every 300 ms
+    // while notifications kept coming. Hold the GPU floor the drag boost uses (688 MHz, kgsl's
+    // thermal limit still caps it) for the animation; the lock ends by itself.
+    private static final int HUN_PERF_BOOST_MS = 600;
+    private static final int HUN_PERF_BOOST_RENEW_MS = 400;
+    private static final int PERF_GPU_MIN_FREQ = 0x4280C000;
+    private static final int HUN_GPU_MIN_FREQ_MHZ = 688;
+    // Created and used on the background thread only: each call is a binder call to perfd.
+    private BoostFramework mHunPerfBoost;
+    private long mLastHunPerfBoostMs;
 
     private final int mExtensionTime;
 
@@ -595,6 +610,7 @@ public class HeadsUpManagerImpl
         if (headsUpEntry.getPinnedStatus().getValue() != pinnedStatus) {
             headsUpEntry.setRowPinnedStatus(pinnedStatus);
             updatePinnedMode();
+            boostHeadsUpAnimation();
             if (isPinned) {
                mUiEventLogger.logWithInstanceId(
                         NotificationPeekEvent.NOTIFICATION_PEEK, entry.getSbn().getUid(),
@@ -609,6 +625,22 @@ public class HeadsUpManagerImpl
                 }
             }
         }
+    }
+
+    /** Holds the GPU floor while a heads-up animates in or out; called on the main thread. */
+    private void boostHeadsUpAnimation() {
+        final long now = mSystemClock.elapsedRealtime();
+        if (now - mLastHunPerfBoostMs < HUN_PERF_BOOST_RENEW_MS) {
+            return;
+        }
+        mLastHunPerfBoostMs = now;
+        BackgroundThread.getHandler().post(() -> {
+            if (mHunPerfBoost == null) {
+                mHunPerfBoost = new BoostFramework();
+            }
+            mHunPerfBoost.perfLockAcquire(HUN_PERF_BOOST_MS, PERF_GPU_MIN_FREQ,
+                    HUN_GPU_MIN_FREQ_MHZ);
+        });
     }
 
     /**
