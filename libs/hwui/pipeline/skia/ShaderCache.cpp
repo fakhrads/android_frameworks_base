@@ -203,6 +203,12 @@ void ShaderCache::store(const SkData& key, const SkData& data, const SkString& /
     size_t keySize = key.size();
     if (keySize == 0 || valueSize == 0 || valueSize >= maxValueSize) {
         ALOGW("ShaderCache::store: sizes %d %d not allowed", (int)keySize, (int)valueSize);
+        if (mInStoreVkPipelineInProgress) {
+            // A pipeline cache this large is never kept, and every flush until the deferred save
+            // would copy all of it out of the driver again just to drop it here. Stop trying until
+            // a new shader is compiled.
+            mTryToStorePipelineCache = false;
+        }
         return;
     }
 
