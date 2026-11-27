@@ -1022,9 +1022,10 @@ public class DisplayPolicy {
             mPerfFps = new BoostFramework();
             final DisplayManager dm = mContext.getSystemService(DisplayManager.class);
             if (dm != null) {
-                // A mode switch between rates of the same size is a refresh rate event, not a
-                // basic display change, so ask for those explicitly. The hint is a binder call
-                // to the perf HAL: keep it off the window manager and UI threads.
+                // Render rate changes, and mode switches between rates of the same size, are
+                // refresh rate events, not basic display changes, so ask for those explicitly.
+                // The hint is a binder call to the perf HAL: keep it off the window manager and
+                // UI threads.
                 dm.registerDisplayListener(mPerfFpsListener, BackgroundThread.getHandler(),
                         DisplayManager.EVENT_TYPE_DISPLAY_CHANGED
                                 | DisplayManager.EVENT_TYPE_DISPLAY_REFRESH_RATE);
@@ -1033,14 +1034,18 @@ public class DisplayPolicy {
         }
     }
 
-    /** Runs on the background thread: sends the default display's mode refresh rate. */
+    /**
+     * Runs on the background thread: sends the default display's render frame rate, the rate
+     * frames are actually drawn at once every vote (an app's range, a power or thermal limit)
+     * is applied, which can be below the panel mode's rate.
+     */
     private void notifyPerfFps() {
         final DisplayManager dm = mContext.getSystemService(DisplayManager.class);
         final Display display = dm != null ? dm.getDisplay(DEFAULT_DISPLAY) : null;
-        if (display == null || display.getMode() == null) {
+        if (display == null) {
             return;
         }
-        final int fps = Math.round(display.getMode().getRefreshRate());
+        final int fps = Math.round(display.getRefreshRate());
         if (fps <= 0 || fps == mPerfFpsSent) {
             return;
         }
