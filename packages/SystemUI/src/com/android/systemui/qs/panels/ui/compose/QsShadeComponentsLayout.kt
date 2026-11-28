@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.android.systemui.qs.panels.ui.model.QsShadeComponent
 
 /** Lays out brightness, volume, tiles, and media according to [components]. */
@@ -53,7 +54,7 @@ fun QsShadeComponentsColumn(
                     }
                 }
             }
-            components.forEach { component ->
+            forEachGroupingSliders(components, brightness, volume) { component ->
                 when (component) {
                     QsShadeComponent.TILES_GRID,
                     QsShadeComponent.MEDIA -> {
@@ -70,7 +71,7 @@ fun QsShadeComponentsColumn(
                 }
             }
         } else {
-            components.forEach { component ->
+            forEachGroupingSliders(components, brightness, volume) { component ->
                 key(component) {
                     when (component) {
                         QsShadeComponent.BRIGHTNESS -> brightness()
@@ -80,6 +81,53 @@ fun QsShadeComponentsColumn(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Space between the brightness and volume sliders when they are next to each other. With the
+ * column's spacing between every component, the two sliders stood apart like separate sections
+ * (about 34 dp of empty space between two 40 dp tracks, counting their own padding), so a
+ * slider pair gets less, as one group.
+ */
+private val SliderPairSpacing = 8.dp
+
+private fun QsShadeComponent.isSlider() =
+    this == QsShadeComponent.BRIGHTNESS || this == QsShadeComponent.VOLUME
+
+/**
+ * Calls [content] for each of [components] in order, but puts a brightness and a volume slider
+ * that are next to each other in a column of their own, [SliderPairSpacing] apart.
+ */
+@Composable
+private fun forEachGroupingSliders(
+    components: List<QsShadeComponent>,
+    brightness: @Composable () -> Unit,
+    volume: @Composable () -> Unit,
+    content: @Composable (QsShadeComponent) -> Unit,
+) {
+    var i = 0
+    while (i < components.size) {
+        val component = components[i]
+        val next = components.getOrNull(i + 1)
+        if (component.isSlider() && next != null && next.isSlider() && next != component) {
+            key(component, next) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(SliderPairSpacing),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    for (slider in listOf(component, next)) {
+                        key(slider) {
+                            if (slider == QsShadeComponent.BRIGHTNESS) brightness() else volume()
+                        }
+                    }
+                }
+            }
+            i += 2
+        } else {
+            content(component)
+            i++
         }
     }
 }

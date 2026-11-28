@@ -759,7 +759,7 @@ constructor(
                                         modifier =
                                             Modifier.fillMaxWidth()
                                                 .padding(
-                                                    vertical =
+                                                    top =
                                                         dimensionResource(
                                                             id = R.dimen.qs_brightness_margin_top
                                                         )
@@ -928,7 +928,7 @@ constructor(
                                                 modifier =
                                                     Modifier.fillMaxWidth()
                                                         .padding(
-                                                            vertical =
+                                                            top =
                                                                 dimensionResource(
                                                                     id =
                                                                         R.dimen
