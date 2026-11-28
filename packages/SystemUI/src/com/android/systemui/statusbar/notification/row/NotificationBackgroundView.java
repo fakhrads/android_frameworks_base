@@ -75,6 +75,9 @@ public class NotificationBackgroundView extends View implements Dumpable,
     private int mExpandAnimationWidth = -1;
     private int mExpandAnimationHeight = -1;
     private int mDrawableAlpha = 255;
+    // The row's own alpha, times its group parent's: the blur region goes straight to
+    // SurfaceFlinger and does not fade with the views above it; see setBlurAlphaScale
+    private float mBlurAlphaScale = 1f;
     private final ColorStateList mLightColoredStatefulColors;
     private final ColorStateList mDarkColoredStatefulColors;
     private int mNormalColor;
@@ -365,9 +368,7 @@ public class NotificationBackgroundView extends View implements Dumpable,
                                         NotificationBackgroundView.this);
                                 mBackgroundBlurDrawable.setColor(
                                         mTintColor != 0 ? mTintColor : mNormalColor);
-                                if (mBlurRegionSuppressed) {
-                                    mBackgroundBlurDrawable.setAlpha(0);
-                                }
+                                mBackgroundBlurDrawable.setAlpha(blurAlpha());
 
                                 updateBackgroundRadii();
                                 invalidate();
@@ -512,7 +513,29 @@ public class NotificationBackgroundView extends View implements Dumpable,
         }
         mBackground.setAlpha(drawableAlpha);
         if (mBackgroundBlurDrawable != null) {
-            mBackgroundBlurDrawable.setAlpha(mBlurRegionSuppressed ? 0 : drawableAlpha);
+            mBackgroundBlurDrawable.setAlpha(blurAlpha());
+        }
+    }
+
+    private int blurAlpha() {
+        return mBlurRegionSuppressed ? 0 : Math.round(mDrawableAlpha * mBlurAlphaScale);
+    }
+
+    /**
+     * Fades the blur region with the row. A row fades by its view alpha (the shade opening and
+     * closing, a swipe, a heads-up going away), which the region ignores: without this a row
+     * still transparent showed as a dark blurred pill, and one swiped away left its blur behind.
+     * At 0 the region is dropped.
+     */
+    public void setBlurAlphaScale(float scale) {
+        scale = Math.max(0f, Math.min(1f, scale));
+        if (mBlurAlphaScale == scale) {
+            return;
+        }
+        mBlurAlphaScale = scale;
+        if (mBackgroundBlurDrawable != null && !mExpandAnimationRunning) {
+            mBackgroundBlurDrawable.setAlpha(blurAlpha());
+            invalidate();
         }
     }
 
@@ -523,7 +546,7 @@ public class NotificationBackgroundView extends View implements Dumpable,
         }
         mBlurRegionSuppressed = suppressed;
         if (mBackgroundBlurDrawable != null) {
-            mBackgroundBlurDrawable.setAlpha(suppressed ? 0 : mDrawableAlpha);
+            mBackgroundBlurDrawable.setAlpha(blurAlpha());
             invalidate();
         }
     }

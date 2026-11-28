@@ -97,6 +97,7 @@ public class NotificationChildrenContainer extends ViewGroup
 
     private final List<View> mDividers = new ArrayList<>();
     private final List<ExpandableNotificationRow> mAttachedChildren = new ArrayList<>();
+    private float mParentBlurAlpha = 1f;
     private final HybridGroupManager mHybridGroupManager;
     private int mChildPadding;
     private int mDividerHeight;
@@ -367,6 +368,7 @@ public class NotificationChildrenContainer extends ViewGroup
 
         row.setContentTransformationAmount(0, false /* isLastChild */);
         row.setNotificationFaded(mContainingNotificationIsFaded);
+        row.setParentBlurAlpha(mParentBlurAlpha);
 
         // It doesn't make sense to keep old animations around, lets cancel them!
         ExpandableViewState viewState = row.getViewState();
@@ -392,6 +394,8 @@ public class NotificationChildrenContainer extends ViewGroup
         int childIndex = mAttachedChildren.indexOf(row);
         mAttachedChildren.remove(row);
         removeView(row);
+        // Out of the group, its alpha no longer depends on the group row's
+        row.setParentBlurAlpha(1f);
 
         final View divider = mDividers.remove(childIndex);
         removeView(divider);
@@ -1846,6 +1850,14 @@ public class NotificationChildrenContainer extends ViewGroup
     public void setBlurRegionSuppressed(boolean suppressed) {
         for (ExpandableNotificationRow child : mAttachedChildren) {
             child.setBlurRegionSuppressed(suppressed);
+        }
+    }
+
+    /** Passes the group row's alpha to the child rows, whose blur regions fade with it. */
+    public void setParentBlurAlpha(float alpha) {
+        mParentBlurAlpha = alpha;
+        for (ExpandableNotificationRow child : mAttachedChildren) {
+            child.setParentBlurAlpha(alpha);
         }
     }
 

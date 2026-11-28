@@ -101,6 +101,7 @@ public abstract class ActivatableNotificationView extends ExpandableOutlineView 
 
     private Interpolator mCurrentAppearInterpolator;
     protected NotificationBackgroundView mBackgroundNormal;
+    private float mParentBlurAlpha = 1f;
     private float mAnimationTranslationY;
     private boolean mDrawingAppearAnimation;
     private ValueAnimator mAppearAnimator;
@@ -891,6 +892,39 @@ public abstract class ActivatableNotificationView extends ExpandableOutlineView 
     /** Suppresses/restores this row's background blur region while the stack is faded out. */
     public void setBlurRegionSuppressed(boolean suppressed) {
         mBackgroundNormal.setBlurRegionSuppressed(suppressed);
+    }
+
+    @Override
+    public void setAlpha(float alpha) {
+        super.setAlpha(alpha);
+        updateBlurAlphaScale();
+    }
+
+    @Override
+    public void setTransitionAlpha(float alpha) {
+        super.setTransitionAlpha(alpha);
+        updateBlurAlphaScale();
+    }
+
+    /** The alpha of the group row containing this one, which its blur region fades with too. */
+    public void setParentBlurAlpha(float alpha) {
+        if (mParentBlurAlpha == alpha) {
+            return;
+        }
+        mParentBlurAlpha = alpha;
+        updateBlurAlphaScale();
+    }
+
+    /** This row's alpha as seen on screen, for blur regions that do not fade with the views. */
+    protected float getBlurAlphaScale() {
+        return getAlpha() * getTransitionAlpha() * mParentBlurAlpha;
+    }
+
+    protected void updateBlurAlphaScale() {
+        // setAlpha can run from the View constructor, before the background exists
+        if (mBackgroundNormal != null) {
+            mBackgroundNormal.setBlurAlphaScale(getBlurAlphaScale());
+        }
     }
 
     /**

@@ -3155,6 +3155,14 @@ public class ExpandableNotificationRow extends ActivatableNotificationView
     }
 
     @Override
+    protected void updateBlurAlphaScale() {
+        super.updateBlurAlphaScale();
+        if (mChildrenContainer != null) {
+            mChildrenContainer.setParentBlurAlpha(getBlurAlphaScale());
+        }
+    }
+
+    @Override
     public int getHeightWithoutLockscreenConstraints() {
         mIgnoreLockscreenConstraints = true;
         final int height = getIntrinsicHeight();
