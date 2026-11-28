@@ -34,10 +34,13 @@ namespace android {
 namespace uirenderer {
 namespace skiapipeline {
 
-// Cache size limits.
+// Cache size limits. The Vulkan pipeline cache is a single value: SystemUI's grew past 2 MiB
+// (2143843 bytes), so it was never written, and its pipelines were built again on the render
+// thread after every restart (14 ms each in a shade animation). The file and the in-memory
+// cache only grow as large as their contents.
 static const size_t maxKeySize = 1024;
-static const size_t maxValueSize = 2 * 1024 * 1024;
-static const size_t maxTotalSize = 4 * 1024 * 1024;
+static const size_t maxValueSize = 4 * 1024 * 1024;
+static const size_t maxTotalSize = 8 * 1024 * 1024;
 static_assert(maxKeySize + maxValueSize < maxTotalSize);
 
 ShaderCache::ShaderCache() {
